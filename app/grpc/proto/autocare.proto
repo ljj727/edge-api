@@ -1,0 +1,171 @@
+syntax = "proto3";
+
+//import "google/protobuf/empty.proto";
+option csharp_namespace = "GrpcDxClient";
+
+package autocare;
+
+// DX API Serivce
+
+service Detector {
+  rpc AddInference(InferenceReq) returns (InferenceRes) {}
+  rpc RemoveInference(InferenceReq) returns (InferenceRes) {}
+  rpc RemoveInferenceAll(AppReq) returns (AppRes) {}
+  rpc UpdateInference(InferenceReq) returns (InferenceRes) {}
+  rpc InstallApp(stream AppReq) returns (AppRes) {}
+  rpc UninstallApp(AppReq) returns (AppRes) {}
+  rpc GetAppList(AppReq) returns (AppList) {}
+  rpc GetInferenceList(InferenceReq) returns (InferenceList) {}
+  rpc GetInferenceStatus(InferenceReq) returns (InferenceRes) {}
+  rpc GetInferenceStatusAll(AppReq) returns (InferenceResList) {}
+  rpc RequestPreviewImage(InferenceReq) returns (InferenceRes) {}
+  rpc LicenseActivation(LicReq) returns (LicRes) {}
+  rpc LicenseDeactivation(LicReq) returns (LicRes) {}
+  rpc LicenseActivate(LicReq) returns (LicRes) {}
+  rpc StartStreaming(StreamingReq) returns (StreamingRes) {}
+  rpc StopStreaming(StreamingReq) returns (StreamingRes) {}
+  rpc GetDx(Empty) returns (Dx){}
+}
+
+message Empty {
+}
+
+message PipelineReq {
+  string app_id = 1;
+}
+
+message PipelineRes {
+  bool result = 1;
+}
+
+message InferenceReq {
+  string app_id = 1;
+  optional string stream_id = 2; // if not set, request for app
+  optional string uri = 3;
+  optional string settings = 4;
+  optional string name = 5;
+}
+
+message InferenceRes {
+  int32 count = 1;
+  optional int32 status = 2; // NG=0,READY,CONNECTING,CONNECTED
+  optional bool eos = 3;
+  optional bool err = 4;
+  optional string meta = 5;
+  optional bytes snapshot = 6;
+  optional string app_id = 7;
+  optional string stream_id = 8;
+}
+
+message AppReq {
+  optional string app_id = 1;
+  optional bytes chunk = 2;
+}
+
+message AppRes {
+  bool result = 1;
+}
+
+message AppList {
+  repeated App app = 1;
+}
+
+message InferenceList {
+  repeated InferenceReq inference = 1;
+}
+
+message InferenceResList {
+  repeated InferenceRes inference = 1;
+}
+
+message LicReq {
+  optional string key = 1;
+  optional string hash_code = 2;
+}
+
+message LicRes {
+  bool result = 1;
+  optional string hash_code = 2;
+}
+
+message StreamingReq {
+  optional string uri = 1;
+  optional string session_id = 2;
+}
+
+message StreamingRes {
+  optional string location = 1;
+  optional int64 ts_start = 2; // timestamp in nano seconds
+  optional string session_id = 3;
+}
+
+// Autocare Analytics App
+message Model {
+  string id = 1;
+  string name = 2;
+  string version = 3;
+  string platform = 4;
+  string framework = 5;
+  int32 capacity = 6;
+  string precision = 7;
+  string desc = 8;
+  string path = 9;
+  string compute_capa = 10;
+  optional int32 ref_count = 11;
+}
+
+
+message Event {
+  string category_id = 1;
+  string category_name = 2;
+  message Target {
+    string event_name = 1;
+    string event_id = 2;
+    repeated string classes = 3;
+  }
+  repeated Target targets = 3;
+}
+
+// not used
+// we just pass pipeline as text(json array)
+message Pipeline {
+  string name = 1;
+  string plugin = 2;
+  optional string model_id = 3;
+  repeated string classes = 4;
+}
+
+message App {
+  string id = 1;
+  string name = 2;
+  optional string evgen_path = 3;
+  repeated Model models = 4;
+  optional string events = 5;
+  string pipelines = 6;
+  optional string cover_path = 7;
+  string desc = 8;
+  optional int32 memory_usage = 9; 
+  optional string version = 10;
+  optional string framework = 11;
+  optional string outputs = 12;
+}
+
+message Inference {
+  string id = 1;
+  string app_id = 2;
+  string stream_id = 3;
+  string uri = 4;
+}
+
+message Dx {
+  string id = 1;          // UUID v4
+  string name = 2;
+  string address = 3;     // 192.168.0.1:80
+  int32 capacity = 4;
+  int32 activated = 5;
+  string version = 6; // rel_1.6.0
+  string framework = 7; // DX21
+  string lic_type = 8;
+  string lic_end_date = 9;
+  string lic_key = 10;
+}
