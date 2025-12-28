@@ -90,3 +90,14 @@ class InferenceStreamStart(BaseModel):
     location: str
     ts_start: int
     session_id: str
+
+
+class InferenceSyncResponse(BaseModel):
+    """Schema for inference sync response."""
+
+    success: bool
+    message: str
+    added_to_db: int = 0  # Core에만 있던 것 → DB 추가
+    added_to_core: int = 0  # DB에만 있던 것 → Core 추가
+    deleted_from_db: int = 0  # Core에 없는 것 → DB 삭제
+    failed: int = 0  # 실패 건수
