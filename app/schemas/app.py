@@ -1,5 +1,7 @@
 """App schemas for API request/response."""
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -40,8 +42,8 @@ class AppPropertyPipeline(BaseModel):
 
     name: str
     type: str | None = None
-    properties: dict[str, str] = {}
-    attributes: dict[str, str] = {}
+    properties: dict[str, Any] = {}
+    attributes: dict[str, Any] = {}
 
 
 class AppProperty(BaseModel):
