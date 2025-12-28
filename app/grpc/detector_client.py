@@ -33,6 +33,18 @@ class StreamingResult:
 
 
 @dataclass
+class AppModelInfo:
+    """App model information from gRPC."""
+    id: str
+    name: str
+    version: str | None = None
+    capacity: int | None = None
+    precision: str | None = None
+    desc: str | None = None
+    path: str | None = None
+
+
+@dataclass
 class AppInfo:
     """App information from gRPC."""
     id: str
@@ -41,6 +53,11 @@ class AppInfo:
     version: str | None = None
     framework: str | None = None
     memory_usage: int | None = None
+    evgen_path: str | None = None
+    cover_path: str | None = None
+    models: list[AppModelInfo] | None = None
+    pipelines: str | None = None  # JSON string
+    outputs: str | None = None  # JSON string
 
 
 @dataclass
@@ -370,13 +387,13 @@ class DetectorClient:
             logger.error(f"gRPC StopStreaming failed: {e.code()} - {e.details()}")
             return False
 
-    async def install_app(self, app_data: bytes, app_id: str | None = None) -> bool:
+    async def install_app(self, app_data: bytes, app_id: str) -> bool:
         """
         Install app package in Core via streaming.
 
         Args:
-            app_data: App package bytes (tar.gz)
-            app_id: Optional app ID
+            app_data: App package bytes (zip file)
+            app_id: App ID (required)
 
         Returns:
             True if installation succeeded
@@ -384,18 +401,22 @@ class DetectorClient:
         self._ensure_connected()
 
         async def chunk_generator() -> AsyncIterator[autocare_pb2.AppReq]:
-            """Generate chunks for streaming upload."""
-            chunk_size = 64 * 1024  # 64KB chunks
+            """Generate 1MB chunks for streaming upload (like legacy C#)."""
+            chunk_size = 1024 * 1024  # 1MB chunks (legacy uses this size)
             for i in range(0, len(app_data), chunk_size):
                 chunk = app_data[i:i + chunk_size]
-                request = autocare_pb2.AppReq(chunk=chunk)
-                if app_id and i == 0:  # Send app_id with first chunk
-                    request.app_id = app_id
-                yield request
+                # Send app_id with every chunk (like legacy)
+                yield autocare_pb2.AppReq(
+                    app_id=app_id,
+                    chunk=chunk,
+                )
 
         try:
-            response: autocare_pb2.AppRes = await self._stub.InstallApp(chunk_generator())
-            logger.info(f"gRPC InstallApp: size={len(app_data)}, result={response.result}")
+            response: autocare_pb2.AppRes = await self._stub.InstallApp(
+                chunk_generator(),
+                timeout=60,  # 60 second timeout like legacy
+            )
+            logger.info(f"gRPC InstallApp: app={app_id}, size={len(app_data)}, result={response.result}")
             return response.result
         except grpc.aio.AioRpcError as e:
             logger.error(f"gRPC InstallApp failed: {e.code()} - {e.details()}")
@@ -423,17 +444,36 @@ class DetectorClient:
 
         try:
             response: autocare_pb2.AppList = await self._stub.GetAppList(request)
-            return [
-                AppInfo(
+            result = []
+            for app in response.app:
+                # Parse models
+                models = []
+                if app.models:
+                    for m in app.models:
+                        models.append(AppModelInfo(
+                            id=m.id,
+                            name=m.name,
+                            version=m.version if m.version else None,
+                            capacity=m.capacity if m.capacity else None,
+                            precision=m.precision if m.precision else None,
+                            desc=m.desc if m.desc else None,
+                            path=m.path if m.path else None,
+                        ))
+
+                result.append(AppInfo(
                     id=app.id,
                     name=app.name,
                     desc=app.desc,
                     version=app.version if app.HasField("version") else None,
                     framework=app.framework if app.HasField("framework") else None,
                     memory_usage=app.memory_usage if app.HasField("memory_usage") else None,
-                )
-                for app in response.app
-            ]
+                    evgen_path=app.evgen_path if app.HasField("evgen_path") else None,
+                    cover_path=app.cover_path if app.HasField("cover_path") else None,
+                    models=models if models else None,
+                    pipelines=app.pipelines if app.pipelines else None,
+                    outputs=app.outputs if app.HasField("outputs") else None,
+                ))
+            return result
         except grpc.aio.AioRpcError as e:
             logger.error(f"gRPC GetAppList failed: {e.code()} - {e.details()}")
             return []
