@@ -177,9 +177,12 @@ class InferenceService(BaseService[Inference]):
         await self.grpc_client.stop_streaming(session_id=session_id)
         return True
 
-    async def get_statuses(self, video_id: str) -> list[InferenceWithStatus]:
-        """Get inference statuses for a video."""
-        inferences = await self.get_by_video_id(video_id)
+    async def get_statuses(self, video_id: str | None = None) -> list[InferenceWithStatus]:
+        """Get inference statuses. If video_id is None, returns all."""
+        if video_id:
+            inferences = await self.get_by_video_id(video_id)
+        else:
+            inferences = await self.get_all()
 
         statuses = []
         for inf in inferences:

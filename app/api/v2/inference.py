@@ -206,14 +206,10 @@ async def get_inference_status(
     """
     Get inference status.
 
-    - **videoId**: Filter by video ID
+    - **videoId**: Filter by video ID (optional, returns all if not provided)
     """
     inference_service = _get_inference_service(db)
-
-    if video_id:
-        return await inference_service.get_statuses(video_id)
-
-    return []
+    return await inference_service.get_statuses(video_id)
 
 
 @router.post("/sync", response_model=InferenceSyncResponse)
