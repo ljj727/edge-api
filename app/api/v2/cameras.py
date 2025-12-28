@@ -13,11 +13,94 @@ from app.schemas.camera import (
     CameraListResponse,
     CameraResponse,
     CameraStreamStatus,
+    CameraSyncResponse,
     CameraUpdate,
 )
 from app.services.stream_service import stream_service
 
 router = APIRouter()
+
+
+@router.post("/sync", response_model=CameraSyncResponse)
+async def sync_cameras_from_mediamtx(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Sync cameras from MediaMTX to database.
+
+    Fetches all streams from MediaMTX and syncs them to the Camera table:
+    - New streams → added
+    - Changed streams → updated
+    - Removed streams → deleted
+    """
+    # Get all streams from MediaMTX
+    streams = await stream_service.get_all_paths()
+
+    # Get existing cameras from DB
+    result = await db.execute(select(Camera))
+    existing_cameras = {c.id: c for c in result.scalars().all()}
+
+    added = 0
+    updated = 0
+    deleted = 0
+    stream_ids = set()
+
+    for stream in streams:
+        stream_name = stream.get("name", "")
+        if not stream_name:
+            continue
+
+        stream_ids.add(stream_name)
+        rtsp_url = stream_service.get_rtsp_url(stream_name)
+        is_ready = stream.get("ready", False)
+
+        if stream_name in existing_cameras:
+            # Update existing camera if changed
+            camera = existing_cameras[stream_name]
+            changed = False
+
+            if camera.rtsp_url != rtsp_url:
+                camera.rtsp_url = rtsp_url
+                changed = True
+            if camera.is_active != is_ready:
+                camera.is_active = is_ready
+                changed = True
+
+            if changed:
+                updated += 1
+                logger.info(f"Camera {stream_name} updated")
+        else:
+            # Add new camera
+            camera = Camera(
+                id=stream_name,
+                name=stream_name,
+                rtsp_url=rtsp_url,
+                is_active=is_ready,
+            )
+            db.add(camera)
+            added += 1
+            logger.info(f"Camera {stream_name} added from MediaMTX")
+
+    # Delete cameras not in MediaMTX
+    for camera_id, camera in existing_cameras.items():
+        if camera_id not in stream_ids:
+            await db.delete(camera)
+            deleted += 1
+            logger.info(f"Camera {camera_id} deleted (not in MediaMTX)")
+
+    await db.commit()
+
+    message = f"Sync completed: {added} added, {updated} updated, {deleted} deleted"
+    logger.info(message)
+
+    return CameraSyncResponse(
+        success=True,
+        message=message,
+        added=added,
+        updated=updated,
+        deleted=deleted,
+    )
 
 
 def _camera_to_response(camera: Camera) -> CameraResponse:

@@ -65,3 +65,13 @@ class CameraListResponse(BaseModel):
 
     cameras: list[CameraResponse]
     total: int
+
+
+class CameraSyncResponse(BaseModel):
+    """Schema for camera sync response."""
+
+    success: bool
+    message: str
+    added: int = 0
+    updated: int = 0
+    deleted: int = 0
