@@ -1,5 +1,6 @@
 """Database models."""
 
+# Note: App is managed by Core via gRPC, not stored in local DB
 from app.models.event import Event
 from app.models.event_setting import EventSetting
 from app.models.eventpush import Eventpush

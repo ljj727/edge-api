@@ -8,6 +8,7 @@ This file should be imported by alembic/env.py.
 from app.db.base import Base
 from app.models.camera import Camera
 from app.models.event import Event
+from app.models.mediamtx_settings import MediaMTXSettings
 from app.models.event_setting import EventSetting
 from app.models.eventpush import Eventpush
 from app.models.image import Image
@@ -23,6 +24,7 @@ __all__ = [
     "Base",
     "Camera",
     "Event",
+    "MediaMTXSettings",
     "EventSetting",
     "Eventpush",
     "Image",
