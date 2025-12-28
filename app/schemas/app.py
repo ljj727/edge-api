@@ -70,3 +70,13 @@ class AppDTO(BaseModel):
     app_max_fps: float | None = Field(None, alias="app_max_fps")
 
     model_config = {"populate_by_name": True}
+
+
+class AppSyncResponse(BaseModel):
+    """Schema for app sync response."""
+
+    success: bool
+    message: str
+    added: int = 0
+    updated: int = 0
+    deleted: int = 0

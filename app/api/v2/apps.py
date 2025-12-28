@@ -8,12 +8,14 @@ from tempfile import TemporaryDirectory
 
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 from loguru import logger
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.deps import CurrentUserRequired, DBSession
 from app.grpc import get_grpc_client
 from app.grpc.detector_client import AppInfo
-from app.schemas.app import AppDTO, AppModel, AppProperty, AppPropertyPipeline, Output, OutputClassifier
+from app.models.app import App
+from app.schemas.app import AppDTO, AppModel, AppProperty, AppPropertyPipeline, AppSyncResponse, Output, OutputClassifier
 
 router = APIRouter()
 settings = get_settings()
@@ -398,3 +400,121 @@ async def delete_app(
 
     logger.info(f"App '{app_id}' deleted by {current_user.username}")
     return {"status": "success", "message": f"App '{app_id}' deleted"}
+
+
+@router.post("/sync", response_model=AppSyncResponse)
+async def sync_apps_from_core(
+    db: DBSession,
+    current_user: CurrentUserRequired,
+) -> AppSyncResponse:
+    """
+    Sync apps from Core to database.
+
+    Fetches all apps from Core via gRPC and syncs to DB:
+    - New apps in Core → added to DB
+    - Existing apps → updated in DB
+    - Apps not in Core → deleted from DB
+    """
+    grpc_client = get_grpc_client()
+    if not grpc_client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Core service not available",
+        )
+
+    # Get apps from Core
+    core_apps = await grpc_client.get_app_list()
+
+    # Get existing apps from DB
+    result = await db.execute(select(App))
+    existing_apps = {app.id: app for app in result.scalars().all()}
+
+    added = 0
+    updated = 0
+    deleted = 0
+    core_app_ids = set()
+
+    for core_app in core_apps:
+        core_app_ids.add(core_app.id)
+
+        # Parse outputs and models for DB storage
+        outputs_json = None
+        if core_app.outputs:
+            try:
+                outputs_json = json.loads(core_app.outputs)
+            except json.JSONDecodeError:
+                pass
+
+        models_json = None
+        if core_app.models:
+            models_json = [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "version": m.version,
+                    "capacity": m.capacity,
+                    "precision": m.precision,
+                    "desc": m.desc,
+                    "path": m.path,
+                }
+                for m in core_app.models
+            ]
+
+        properties_json = None
+        if core_app.pipelines:
+            try:
+                properties_json = {"pipeline": json.loads(core_app.pipelines)}
+            except json.JSONDecodeError:
+                pass
+
+        if core_app.id in existing_apps:
+            # Update existing app
+            app = existing_apps[core_app.id]
+            app.name = core_app.name
+            app.desc = core_app.desc
+            app.version = core_app.version
+            app.framework = core_app.framework
+            app.models = models_json
+            app.outputs = outputs_json
+            app.properties = properties_json
+            app.app_memory_usage = core_app.memory_usage
+            app.cover_path = core_app.cover_path
+            updated += 1
+            logger.debug(f"App {core_app.id} updated from Core")
+        else:
+            # Add new app
+            app = App(
+                id=core_app.id,
+                name=core_app.name,
+                desc=core_app.desc,
+                version=core_app.version,
+                framework=core_app.framework,
+                models=models_json,
+                outputs=outputs_json,
+                properties=properties_json,
+                app_memory_usage=core_app.memory_usage,
+                cover_path=core_app.cover_path,
+            )
+            db.add(app)
+            added += 1
+            logger.info(f"App {core_app.id} added from Core")
+
+    # Delete apps not in Core
+    for app_id, app in existing_apps.items():
+        if app_id not in core_app_ids:
+            await db.delete(app)
+            deleted += 1
+            logger.info(f"App {app_id} deleted (not in Core)")
+
+    await db.commit()
+
+    message = f"Sync completed: {added} added, {updated} updated, {deleted} deleted"
+    logger.info(message)
+
+    return AppSyncResponse(
+        success=True,
+        message=message,
+        added=added,
+        updated=updated,
+        deleted=deleted,
+    )
