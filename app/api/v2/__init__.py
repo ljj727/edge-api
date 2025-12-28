@@ -16,6 +16,7 @@ from app.api.v2.metrics import router as metrics_router
 from app.api.v2.mx import router as mx_router
 from app.api.v2.registry import router as registry_router
 from app.api.v2.sensors import router as sensors_router
+from app.api.v2.statistics import router as statistics_router
 from app.api.v2.system import router as system_router
 from app.api.v2.users import router as users_router
 from app.api.v2.videos import router as videos_router
@@ -39,3 +40,4 @@ router.include_router(system_router, prefix="/system", tags=["System"])
 router.include_router(license_router, prefix="/license", tags=["License"])
 router.include_router(metrics_router, prefix="/metrics", tags=["Metrics"])
 router.include_router(sensors_router, prefix="/sensors", tags=["Sensors"])
+router.include_router(statistics_router, prefix="/statistics", tags=["Statistics"])
