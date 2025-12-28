@@ -9,38 +9,31 @@ dependencies = [
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
     "python-multipart>=0.0.6",
-
     # Database
     "sqlalchemy[asyncio]>=2.0.25",
     "aiosqlite>=0.19.0",
     "alembic>=1.13.1",
-
     # Authentication
     "python-jose[cryptography]>=3.3.0",
     "bcrypt>=4.0.0",
-
     # Validation & Settings
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
-
     # Communication
     "grpcio>=1.60.0",
     "grpcio-tools>=1.60.0",
     "protobuf>=4.25.0",
     "nats-py>=2.6.0",
-
     # HTTP Client
     "httpx>=0.26.0",
     "aiofiles>=23.2.1",
-
     # Background Tasks
     "apscheduler>=3.10.4",
-
     # Logging
     "loguru>=0.7.2",
-
     # YAML Config
     "pyyaml>=6.0.1",
+    "psutil>=7.2.0",
 ]
 
 [project.optional-dependencies]
