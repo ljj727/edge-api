@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.core.deps import CurrentUserRequired, DBSession
+from app.grpc import get_grpc_client
 from app.schemas.inference import (
     InferenceCreate,
     InferenceDTO,
@@ -16,6 +17,11 @@ from app.services.inference_service import InferenceService
 router = APIRouter()
 
 
+def _get_inference_service(db) -> InferenceService:
+    """Get inference service with gRPC client."""
+    return InferenceService(db, grpc_client=get_grpc_client())
+
+
 @router.get("", response_model=list[InferenceDTO])
 async def get_inferences(
     db: DBSession,
@@ -27,7 +33,7 @@ async def get_inferences(
 
     - **videoId**: Filter by video ID
     """
-    inference_service = InferenceService(db)
+    inference_service = _get_inference_service(db)
 
     if video_id:
         return await inference_service.get_by_video_id(video_id)
@@ -51,7 +57,7 @@ async def create_inference(
     - **uri**: Inference server URI (required)
     - **settings**: Inference settings (event configs, etc.)
     """
-    inference_service = InferenceService(db)
+    inference_service = _get_inference_service(db)
     return await inference_service.create_inference(data)
 
 
@@ -68,7 +74,7 @@ async def delete_inference(
     - **appId**: Application ID
     - **videoId**: Video ID
     """
-    inference_service = InferenceService(db)
+    inference_service = _get_inference_service(db)
     success = await inference_service.remove_inference(app_id, video_id)
 
     if not success:
@@ -95,7 +101,7 @@ async def update_event_setting(
     - **videoId**: Video ID
     - **settings**: New inference settings
     """
-    inference_service = InferenceService(db)
+    inference_service = _get_inference_service(db)
     result = await inference_service.update_event_setting(
         app_id, video_id, data.settings
     )
@@ -122,7 +128,7 @@ async def get_preview(
     - **appId**: Application ID
     - **videoId**: Video ID
     """
-    inference_service = InferenceService(db)
+    inference_service = _get_inference_service(db)
     image_data = await inference_service.get_preview_image(app_id, video_id)
 
     if not image_data:
@@ -152,7 +158,7 @@ async def start_stream(
     - **videoId**: Video ID
     - **uri**: Stream URI
     """
-    inference_service = InferenceService(db)
+    inference_service = _get_inference_service(db)
     result = await inference_service.start_stream(app_id, video_id, uri)
 
     if not result:
@@ -175,7 +181,7 @@ async def stop_stream(
 
     - **sessionId**: Stream session ID
     """
-    inference_service = InferenceService(db)
+    inference_service = _get_inference_service(db)
     success = await inference_service.stop_stream(session_id)
 
     if not success:
@@ -198,7 +204,7 @@ async def get_inference_status(
 
     - **videoId**: Filter by video ID
     """
-    inference_service = InferenceService(db)
+    inference_service = _get_inference_service(db)
 
     if video_id:
         return await inference_service.get_statuses(video_id)

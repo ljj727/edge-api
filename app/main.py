@@ -21,7 +21,7 @@ from app.core.config import get_settings
 from app.db.base import Base
 from app.db import models_registry  # noqa: F401 - Import to register models
 from app.db.session import engine
-from app.grpc.detector_client import DetectorClient
+from app.grpc import DetectorClient, set_grpc_client
 from app.workers.event_retention import EventRetentionWorker
 from app.workers.eventpush_worker import EventpushWorker
 from app.workers.image_retention import ImageRetentionWorker
@@ -74,6 +74,7 @@ async def start_background_services() -> None:
     grpc_client = DetectorClient()
     try:
         await grpc_client.connect()
+        set_grpc_client(grpc_client)  # Set global instance for other modules
     except Exception as e:
         logger.warning(f"gRPC connection failed (will retry): {e}")
 
@@ -142,6 +143,7 @@ async def stop_background_services() -> None:
 
     if grpc_client:
         await grpc_client.disconnect()
+        set_grpc_client(None)  # Clear global instance
         logger.info("gRPC client disconnected")
 
 
@@ -247,11 +249,6 @@ async def spa_fallback(path: str):
         status_code=404,
         content={"Code": 404, "Message": "Not found"},
     )
-
-
-def get_grpc_client() -> DetectorClient | None:
-    """Get global gRPC client instance."""
-    return grpc_client
 
 
 if __name__ == "__main__":
