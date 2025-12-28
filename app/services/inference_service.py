@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from loguru import logger
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,12 +80,16 @@ class InferenceService(BaseService[Inference]):
         if not inference:
             return False
 
-        # Unregister from Core via gRPC
+        # Unregister from Core via gRPC (best effort - continue even if Core doesn't have it)
         if self.grpc_client:
-            await self.grpc_client.remove_inference(
-                app_id=app_id,
-                video_id=video_id,
-            )
+            try:
+                await self.grpc_client.remove_inference(
+                    app_id=app_id,
+                    video_id=video_id,
+                )
+            except Exception as e:
+                # Core might not have this inference (already removed, never added, etc.)
+                logger.warning(f"Failed to remove inference from Core (continuing): {e}")
 
         await self.delete(inference)
         return True
@@ -93,22 +98,36 @@ class InferenceService(BaseService[Inference]):
         self,
         app_id: str,
         video_id: str,
-        settings: InferenceSettings,
+        new_settings: InferenceSettings,
     ) -> InferenceDTO | None:
         """Update inference event settings."""
         inference = await self.get_by_composite_key(app_id, video_id)
         if not inference:
             return None
 
-        inference.set_settings(settings.model_dump())
+        inference.set_settings(new_settings.model_dump())
 
-        # Update Core via gRPC
+        # Update Core via gRPC (disabled when enable_core_services=False)
         if self.grpc_client:
             await self.grpc_client.update_inference(
                 app_id=app_id,
                 video_id=video_id,
-                settings=settings.model_dump(),
+                settings=new_settings.model_dump(),
             )
+
+        # Publish to NATS (disabled when enable_core_services=False)
+        if settings.enable_core_services:
+            try:
+                from app.workers.nats_publisher import get_nats_publisher
+
+                publisher = await get_nats_publisher()
+                await publisher.publish_event_setting_update(
+                    app_id=app_id,
+                    video_id=video_id,
+                    settings=new_settings.model_dump(),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to publish event setting update to NATS: {e}")
 
         await self.update(inference)
         return self._to_dto(inference)
@@ -135,10 +154,12 @@ class InferenceService(BaseService[Inference]):
         if not self.grpc_client:
             return None
 
+        # Generate session ID from app_id and video_id for tracking
+        session_id = f"{app_id}_{video_id}"
+
         result = await self.grpc_client.start_streaming(
-            app_id=app_id,
-            video_id=video_id,
             uri=uri,
+            session_id=session_id,
         )
         if result:
             return {
