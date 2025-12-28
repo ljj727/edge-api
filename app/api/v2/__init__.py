@@ -5,6 +5,8 @@ from fastapi import APIRouter
 from app.api.v2.apps import router as apps_router
 from app.api.v2.auth import router as auth_router
 from app.api.v2.cameras import router as cameras_router
+from app.api.v2.mediamtx import router as mediamtx_router
+from app.api.v2.streams import router as streams_router
 from app.api.v2.eventpushes import router as eventpushes_router
 from app.api.v2.events import router as events_router
 from app.api.v2.inference import router as inference_router
@@ -25,10 +27,12 @@ router.include_router(users_router, prefix="/users", tags=["Users"])
 router.include_router(apps_router, prefix="/apps", tags=["Apps"])
 router.include_router(videos_router, prefix="/videos", tags=["Videos"])
 router.include_router(cameras_router, prefix="/cameras", tags=["Cameras"])
+router.include_router(streams_router, prefix="/streams", tags=["Streams"])
 router.include_router(inference_router, prefix="/inference", tags=["Inference"])
 router.include_router(events_router, prefix="/events", tags=["Events"])
 router.include_router(eventpushes_router, prefix="/eventpushes", tags=["Eventpushes"])
 router.include_router(mx_router, prefix="/mx", tags=["Mx"])
+router.include_router(mediamtx_router, prefix="/mediamtx", tags=["MediaMTX"])
 router.include_router(registry_router, prefix="/registry", tags=["Registry"])
 router.include_router(media_router, prefix="/media", tags=["Media"])
 router.include_router(system_router, prefix="/system", tags=["System"])
