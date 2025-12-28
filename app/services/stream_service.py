@@ -4,10 +4,12 @@ from typing import Any
 
 import httpx
 from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 
-settings = get_settings()
+env_settings = get_settings()
 
 
 class StreamService:
@@ -16,14 +18,77 @@ class StreamService:
 
     MediaMTX is a media server that converts RTSP streams to HLS/WebRTC
     for browser playback.
+
+    Settings are loaded from DB if available, otherwise from .env defaults.
     """
 
     def __init__(self):
-        self.api_url = settings.mediamtx_api_url
-        self.hls_url = settings.mediamtx_hls_url
-        self.webrtc_url = settings.mediamtx_webrtc_url
-        self.enabled = settings.mediamtx_enabled
+        # Default settings from .env
+        self._api_url = env_settings.mediamtx_api_url
+        self._hls_url = env_settings.mediamtx_hls_url
+        self._webrtc_url = env_settings.mediamtx_webrtc_url
+        self._rtsp_url = env_settings.mediamtx_rtsp_url
+        self._enabled = env_settings.mediamtx_enabled
         self._timeout = 10.0
+        self._settings_loaded = False
+
+    async def _load_settings_from_db(self, db: AsyncSession) -> None:
+        """Load settings from database if available."""
+        try:
+            from app.models.mediamtx_settings import MediaMTXSettings
+
+            result = await db.execute(
+                select(MediaMTXSettings).where(MediaMTXSettings.id == 1)
+            )
+            db_settings = result.scalar_one_or_none()
+
+            if db_settings:
+                self._api_url = db_settings.api_url
+                self._hls_url = db_settings.hls_url
+                self._webrtc_url = db_settings.webrtc_url
+                self._rtsp_url = db_settings.rtsp_url
+                self._enabled = db_settings.enabled
+                self._settings_loaded = True
+                logger.debug("MediaMTX settings loaded from database")
+        except Exception as e:
+            logger.warning(f"Failed to load MediaMTX settings from DB, using .env: {e}")
+
+    def update_settings(
+        self,
+        api_url: str,
+        hls_url: str,
+        webrtc_url: str,
+        rtsp_url: str,
+        enabled: bool,
+    ) -> None:
+        """Update settings in memory (called after DB update)."""
+        self._api_url = api_url
+        self._hls_url = hls_url
+        self._webrtc_url = webrtc_url
+        self._rtsp_url = rtsp_url
+        self._enabled = enabled
+        self._settings_loaded = True
+        logger.info("MediaMTX settings updated in stream service")
+
+    @property
+    def api_url(self) -> str:
+        return self._api_url
+
+    @property
+    def hls_url(self) -> str:
+        return self._hls_url
+
+    @property
+    def webrtc_url(self) -> str:
+        return self._webrtc_url
+
+    @property
+    def rtsp_url(self) -> str:
+        return self._rtsp_url
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
 
     async def register_camera(self, camera_id: str, rtsp_url: str) -> bool:
         """
@@ -36,14 +101,14 @@ class StreamService:
         Returns:
             True if registration succeeded, False otherwise
         """
-        if not self.enabled:
+        if not self._enabled:
             logger.warning("MediaMTX is disabled, skipping camera registration")
             return True
 
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
-                    f"{self.api_url}/config/paths/add/{camera_id}",
+                    f"{self._api_url}/config/paths/add/{camera_id}",
                     json={"source": rtsp_url},
                     timeout=self._timeout,
                 )
@@ -55,7 +120,7 @@ class StreamService:
                 # Path might already exist, try to patch instead
                 if response.status_code == 400:
                     patch_response = await client.patch(
-                        f"{self.api_url}/config/paths/patch/{camera_id}",
+                        f"{self._api_url}/config/paths/patch/{camera_id}",
                         json={"source": rtsp_url},
                         timeout=self._timeout,
                     )
@@ -83,14 +148,14 @@ class StreamService:
         Returns:
             True if removal succeeded, False otherwise
         """
-        if not self.enabled:
+        if not self._enabled:
             logger.warning("MediaMTX is disabled, skipping camera unregistration")
             return True
 
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.delete(
-                    f"{self.api_url}/config/paths/delete/{camera_id}",
+                    f"{self._api_url}/config/paths/delete/{camera_id}",
                     timeout=self._timeout,
                 )
 
@@ -124,14 +189,14 @@ class StreamService:
         Returns:
             True if update succeeded, False otherwise
         """
-        if not self.enabled:
+        if not self._enabled:
             logger.warning("MediaMTX is disabled, skipping camera update")
             return True
 
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.patch(
-                    f"{self.api_url}/config/paths/patch/{camera_id}",
+                    f"{self._api_url}/config/paths/patch/{camera_id}",
                     json={"source": rtsp_url},
                     timeout=self._timeout,
                 )
@@ -164,13 +229,13 @@ class StreamService:
         Returns:
             Status dictionary with stream information
         """
-        if not self.enabled:
+        if not self._enabled:
             return {"status": "disabled", "message": "MediaMTX is disabled"}
 
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
-                    f"{self.api_url}/paths/get/{camera_id}",
+                    f"{self._api_url}/paths/get/{camera_id}",
                     timeout=5.0,
                 )
 
@@ -199,13 +264,13 @@ class StreamService:
         Returns:
             List of path configurations
         """
-        if not self.enabled:
+        if not self._enabled:
             return []
 
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
-                    f"{self.api_url}/paths/list",
+                    f"{self._api_url}/paths/list",
                     timeout=5.0,
                 )
 
@@ -220,43 +285,30 @@ class StreamService:
                 return []
 
     def get_hls_url(self, camera_id: str) -> str:
-        """
-        Generate HLS streaming URL for a camera.
-
-        Args:
-            camera_id: Camera identifier (MediaMTX path name)
-
-        Returns:
-            HLS M3U8 playlist URL
-        """
-        return f"{self.hls_url}/{camera_id}/index.m3u8"
+        """Generate HLS streaming URL for a camera."""
+        return f"{self._hls_url}/{camera_id}/index.m3u8"
 
     def get_webrtc_url(self, camera_id: str) -> str:
-        """
-        Generate WebRTC WHEP URL for a camera.
+        """Generate WebRTC WHEP URL for a camera."""
+        return f"{self._webrtc_url}/{camera_id}/whep"
 
-        Args:
-            camera_id: Camera identifier (MediaMTX path name)
+    def get_webrtc_player_url(self, camera_id: str) -> str:
+        """Generate WebRTC player URL for a camera (iframe embeddable)."""
+        return f"{self._webrtc_url}/{camera_id}"
 
-        Returns:
-            WebRTC WHEP endpoint URL
-        """
-        return f"{self.webrtc_url}/{camera_id}/whep"
+    def get_rtsp_url(self, camera_id: str) -> str:
+        """Generate RTSP URL for a camera."""
+        return f"{self._rtsp_url}/{camera_id}"
 
     async def health_check(self) -> dict[str, Any]:
-        """
-        Check MediaMTX server health.
-
-        Returns:
-            Health status dictionary
-        """
-        if not self.enabled:
+        """Check MediaMTX server health."""
+        if not self._enabled:
             return {"healthy": True, "message": "MediaMTX is disabled"}
 
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
-                    f"{self.api_url}/paths/list",
+                    f"{self._api_url}/paths/list",
                     timeout=5.0,
                 )
 

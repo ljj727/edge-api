@@ -109,6 +109,11 @@ class Settings(BaseSettings):
         alias="MEDIAMTX_WEBRTC_URL",
         description="MediaMTX WebRTC streaming URL",
     )
+    mediamtx_rtsp_url: str = Field(
+        default="rtsp://localhost:8554",
+        alias="MEDIAMTX_RTSP_URL",
+        description="MediaMTX RTSP streaming URL",
+    )
     mediamtx_enabled: bool = Field(
         default=True,
         alias="MEDIAMTX_ENABLED",
