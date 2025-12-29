@@ -20,12 +20,15 @@ from app.api import router as api_router
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db import models_registry  # noqa: F401 - Import to register models
-from app.db.session import engine
+from app.db.session import async_session_maker, engine
 from app.grpc import DetectorClient, set_grpc_client
+from app.services.event_service import EventService
+from app.workers.alarm_service import alarm_service_lifespan
 from app.workers.event_retention import EventRetentionWorker
 from app.workers.eventpush_worker import EventpushWorker
 from app.workers.image_retention import ImageRetentionWorker
 from app.workers.nats_subscriber import NatsEventSubscriber
+from app.workers.nats_wakeup_service import nats_wakeup_lifespan
 
 settings = get_settings()
 
@@ -61,6 +64,37 @@ async def init_default_user() -> None:
             logger.info("Default admin user created")
 
 
+async def init_default_sensor_types() -> None:
+    """Create default sensor types if not exist."""
+    from sqlalchemy import select
+
+    from app.models.sensor import SensorType
+
+    default_types = [
+        ("type_adam", "Adam6050", "Advantech Modbus TCP I/O controller"),
+        ("type_moxa", "IoLogik_E1211", "MOXA REST API I/O controller"),
+        ("type_speaker", "AEPEL_IPSpeaker", "HTTP-based IP speaker"),
+        ("type_led", "LA6_POE", "PATLITE socket-based LED signal tower"),
+    ]
+
+    async with async_session_maker() as db:
+        created = 0
+        for type_id, name, protocol in default_types:
+            existing = await db.execute(
+                select(SensorType).where(SensorType.name == name)
+            )
+            if existing.scalar_one_or_none():
+                continue
+
+            sensor_type = SensorType(id=type_id, name=name, protocol=protocol)
+            db.add(sensor_type)
+            created += 1
+
+        if created > 0:
+            await db.commit()
+            logger.info(f"Default sensor types created: {created}")
+
+
 async def start_background_services() -> None:
     """Start background services."""
     global grpc_client, nats_subscriber, eventpush_worker, scheduler
@@ -86,8 +120,21 @@ async def start_background_services() -> None:
     # Initialize NATS subscriber
     nats_subscriber = NatsEventSubscriber()
 
-    # Register event handler to push to webhooks
+    # Register event handler to save to DB and push to webhooks
     async def on_event(event: dict) -> None:
+        # Log full event structure for debugging
+        logger.info(f"NATS event received: {event}")
+
+        # Save event to database
+        try:
+            async with async_session_maker() as db:
+                event_service = EventService(db)
+                await event_service.save_event_from_nats(event)
+                logger.debug(f"Event saved to DB: {event.get('videoId')}")
+        except Exception as e:
+            logger.error(f"Failed to save event to DB: {e}")
+
+        # Push to webhooks
         if eventpush_worker:
             await eventpush_worker.enqueue(event)
 
@@ -149,7 +196,10 @@ async def stop_background_services() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan events."""
+    """Application lifespan events.
+
+    Uses async context managers for clean resource management.
+    """
     # Startup
     logger.info("Starting Edge Backend API...")
 
@@ -159,14 +209,24 @@ async def lifespan(app: FastAPI):
 
     await init_database()
     await init_default_user()
+    await init_default_sensor_types()
     await start_background_services()
 
-    logger.info(f"Edge Backend API started on port {settings.port}")
-
-    yield
+    # Start NATS services with context managers (modern pattern)
+    if settings.enable_core_services:
+        async with nats_wakeup_lifespan():
+            logger.info("NATS wakeup service started")
+            async with alarm_service_lifespan():
+                logger.info("Alarm service started (Event Bridge integrated)")
+                logger.info(f"Edge Backend API started on port {settings.port}")
+                yield
+                logger.info("Shutting down Edge Backend API...")
+    else:
+        logger.info(f"Edge Backend API started on port {settings.port}")
+        yield
+        logger.info("Shutting down Edge Backend API...")
 
     # Shutdown
-    logger.info("Shutting down Edge Backend API...")
     await stop_background_services()
     logger.info("Edge Backend API stopped")
 

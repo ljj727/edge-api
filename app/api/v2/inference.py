@@ -8,6 +8,7 @@ from app.core.deps import CurrentUserRequired, DBSession
 from app.grpc import get_grpc_client
 from app.models.inference import Inference
 from app.schemas.inference import (
+    EventSettingUpdateResponse,
     InferenceCreate,
     InferenceDTO,
     InferenceEventSettingUpdate,
@@ -90,33 +91,48 @@ async def delete_inference(
     return {"status": "success"}
 
 
-@router.put("/event-setting", response_model=InferenceDTO)
+@router.put("/event-setting", response_model=EventSettingUpdateResponse)
 async def update_event_setting(
     data: InferenceEventSettingUpdate,
     db: DBSession,
     current_user: CurrentUserRequired,
     app_id: str = Query(..., alias="appId"),
     video_id: str = Query(..., alias="videoId"),
-) -> InferenceDTO:
+) -> EventSettingUpdateResponse:
     """
     Update inference event settings.
 
+    Sends settings to event-compositor via NATS and saves to DB.
+
     - **appId**: Application ID
     - **videoId**: Video ID
-    - **settings**: New inference settings
+    - **settings**: New inference settings (version + configs array)
+
+    Response includes:
+    - **inference**: Updated inference configuration
+    - **nats_sent**: Whether NATS message was sent
+    - **nats_success**: Whether compositor accepted settings
+    - **nats_message**: Success/error message from compositor
+    - **termEvList**: Terminal event IDs to watch for events
     """
     inference_service = _get_inference_service(db)
-    result = await inference_service.update_event_setting(
+    inference_dto, nats_info = await inference_service.update_event_setting(
         app_id, video_id, data.settings
     )
 
-    if not result:
+    if inference_dto is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inference not found",
+            detail=nats_info.get("error", "Inference not found"),
         )
 
-    return result
+    return EventSettingUpdateResponse(
+        inference=inference_dto,
+        nats_sent=nats_info.get("nats_sent", False),
+        nats_success=nats_info.get("nats_success", False),
+        nats_message=nats_info.get("nats_message", ""),
+        term_ev_list=nats_info.get("term_ev_list", []),
+    )
 
 
 @router.get("/preview")

@@ -33,6 +33,67 @@ class EventService(BaseService[Event]):
     def __init__(self, db: AsyncSession):
         super().__init__(db, Event)
 
+    async def save_event_from_nats(self, data: dict[str, Any]) -> list[Event]:
+        """Save events received from NATS to database.
+
+        NATS event format from EC:
+        {
+            "metadata": {
+                "streamId": str,  # → video_id
+                "vmsId": str,
+                "appId": str,
+                "timestamp": int (nanoseconds)
+            },
+            "events": [
+                {
+                    "eventSettingId": str,
+                    "eventSettingName": str,
+                    "objects": [{"trackId": int, "label": str, "bbox": {...}, "score": float}],
+                    "caption": str,
+                    "description": str
+                }
+            ]
+        }
+        """
+        metadata = data.get("metadata", {})
+        events_data = data.get("events", [])
+
+        # Extract common metadata
+        video_id = metadata.get("streamId")
+        vms_id = metadata.get("vmsId")
+        app_id = metadata.get("appId")
+        # Convert nanoseconds to milliseconds
+        timestamp_ns = metadata.get("timestamp", 0)
+        timestamp_ms = timestamp_ns // 1_000_000 if timestamp_ns > 0 else 0
+
+        saved_events = []
+        for event_data in events_data:
+            event = Event(
+                event_setting_id=event_data.get("eventSettingId"),
+                event_setting_name=event_data.get("eventSettingName"),
+                video_id=video_id,
+                video_name=video_id,  # Use streamId as video_name if not provided
+                app_id=app_id,
+                timestamp=timestamp_ms,
+                caption=event_data.get("caption"),
+                desc=event_data.get("description"),
+                device_id=None,
+                vms_id=vms_id,
+            )
+
+            # Set objects and extract object_type
+            objects = event_data.get("objects", [])
+            event.set_objects(objects)
+
+            self.db.add(event)
+            saved_events.append(event)
+
+        await self.db.commit()
+        for event in saved_events:
+            await self.db.refresh(event)
+
+        return saved_events
+
     async def get_events(self, params: EventQueryParams) -> EventPagedResponse:
         """Get paginated events with filters."""
         query = select(Event)

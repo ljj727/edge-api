@@ -99,38 +99,79 @@ class InferenceService(BaseService[Inference]):
         app_id: str,
         video_id: str,
         new_settings: InferenceSettings,
-    ) -> InferenceDTO | None:
-        """Update inference event settings."""
+    ) -> tuple[InferenceDTO | None, dict]:
+        """Update inference event settings.
+
+        Pipeline:
+        1. Validate inference exists in DB
+        2. Send to NATS (event-compositor) with request-response
+        3. Get terminal event list from compositor
+        4. Update DB with new settings
+        5. Return DTO and NATS response info
+
+        Returns:
+            Tuple of (InferenceDTO or None, nats_response_info dict)
+        """
+        from app.workers.nats_publisher import EventSettingResponse
+
         inference = await self.get_by_composite_key(app_id, video_id)
         if not inference:
-            return None
+            return None, {"error": "Inference not found"}
 
-        inference.set_settings(new_settings.model_dump())
+        nats_info: dict = {
+            "nats_sent": False,
+            "nats_success": False,
+            "nats_message": "",
+            "term_ev_list": [],
+        }
 
-        # Update Core via gRPC (disabled when enable_core_services=False)
-        if self.grpc_client:
-            await self.grpc_client.update_inference(
-                app_id=app_id,
-                video_id=video_id,
-                settings=new_settings.model_dump(),
-            )
-
-        # Publish to NATS (disabled when enable_core_services=False)
+        # Send to NATS (event-compositor) if core services enabled
         if settings.enable_core_services:
             try:
                 from app.workers.nats_publisher import get_nats_publisher
 
                 publisher = await get_nats_publisher()
-                await publisher.publish_event_setting_update(
+
+                # Convert to NATS format (camelCase)
+                nats_payload = new_settings.to_nats_dict()
+
+                response = await publisher.publish_event_setting_update(
+                    app_id=app_id,
+                    video_id=video_id,
+                    settings=nats_payload,
+                )
+
+                nats_info["nats_sent"] = True
+                nats_info["nats_success"] = response.success
+                nats_info["nats_message"] = response.message
+                nats_info["term_ev_list"] = response.term_ev_list
+
+                if not response.success:
+                    logger.warning(
+                        f"Event compositor rejected settings for {app_id}/{video_id}: "
+                        f"{response.message}"
+                    )
+                    # Continue to save DB anyway - user can retry
+            except Exception as e:
+                logger.warning(f"Failed to publish event setting update to NATS: {e}")
+                nats_info["nats_message"] = str(e)
+
+        # Update gRPC client if available
+        if self.grpc_client:
+            try:
+                await self.grpc_client.update_inference(
                     app_id=app_id,
                     video_id=video_id,
                     settings=new_settings.model_dump(),
                 )
             except Exception as e:
-                logger.warning(f"Failed to publish event setting update to NATS: {e}")
+                logger.warning(f"Failed to update inference via gRPC: {e}")
 
+        # Always save to DB
+        inference.set_settings(new_settings.model_dump())
         await self.update(inference)
-        return self._to_dto(inference)
+
+        return self._to_dto(inference), nats_info
 
     async def get_preview_image(
         self, app_id: str, video_id: str

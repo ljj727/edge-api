@@ -45,8 +45,11 @@ class NatsEventSubscriber:
         """Add event handler callback."""
         self._event_handlers.append(handler)
 
-    async def subscribe_events(self, subject: str = "events.>") -> None:
-        """Subscribe to event topics."""
+    async def subscribe_events(self, subject: str = "event.>") -> None:
+        """Subscribe to event topics from event-compositor.
+
+        EC publishes to: event.updated.{stream_id}
+        """
         if not self._client:
             raise RuntimeError("Not connected to NATS")
 

@@ -9,6 +9,7 @@ from app.models.inference import Inference
 from app.models.mx import Mx
 from app.models.protocol import Protocol
 from app.models.registry import Registry
+from app.models.sensor import Sensor, SensorType
 from app.models.subscription import BaseEventSubscription, Subscription
 from app.models.user import User
 from app.models.video import Video
@@ -22,6 +23,8 @@ __all__ = [
     "Mx",
     "Protocol",
     "Registry",
+    "Sensor",
+    "SensorType",
     "BaseEventSubscription",
     "Subscription",
     "User",
