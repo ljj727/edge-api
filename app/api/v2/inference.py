@@ -117,7 +117,7 @@ async def update_event_setting(
     """
     inference_service = _get_inference_service(db)
     inference_dto, nats_info = await inference_service.update_event_setting(
-        app_id, video_id, data.settings
+        app_id, video_id, data.settings, data.node_settings
     )
 
     if inference_dto is None:

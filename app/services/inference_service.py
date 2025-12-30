@@ -99,6 +99,7 @@ class InferenceService(BaseService[Inference]):
         app_id: str,
         video_id: str,
         new_settings: InferenceSettings,
+        node_settings: str | None = None,
     ) -> tuple[InferenceDTO | None, dict]:
         """Update inference event settings.
 
@@ -169,6 +170,13 @@ class InferenceService(BaseService[Inference]):
 
         # Always save to DB
         inference.set_settings(new_settings.model_dump())
+        if node_settings is not None:
+            try:
+                import json
+                node_settings_dict = json.loads(node_settings)
+                inference.set_node_settings(node_settings_dict)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse node_settings JSON for {app_id}/{video_id}")
         await self.update(inference)
 
         return self._to_dto(inference), nats_info

@@ -233,6 +233,9 @@ class InferenceEventSettingUpdate(BaseModel):
     """Inference event setting update schema."""
 
     settings: InferenceSettings
+    node_settings: str | None = Field(None, alias="nodeSettings")  # JSON string of complete flow graph for UI restoration
+
+    model_config = {"populate_by_name": True}
 
 
 class InferenceWithStatus(BaseModel):
